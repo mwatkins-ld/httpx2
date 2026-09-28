@@ -166,19 +166,6 @@ class NetRCAuth(Auth):
         return f"Basic {token}"
 
 
-def _md5_is_available() -> bool:
-    # MD5 is not FIPS-approved. Some FIPS-enforced Python builds remove hashlib.md5
-    # entirely, while others keep it but raise ValueError when called with
-    # usedforsecurity=True (the default).
-    if not hasattr(hashlib, "md5"):
-        return False
-    try:
-        hashlib.md5(b"", usedforsecurity=True)
-    except ValueError:
-        return False
-    return True
-
-
 def _build_algorithm_map() -> dict[str, typing.Callable[[bytes], _Hash]]:
     algorithms: dict[str, typing.Callable[[bytes], _Hash]] = {
         "SHA": hashlib.sha1,
@@ -188,9 +175,17 @@ def _build_algorithm_map() -> dict[str, typing.Callable[[bytes], _Hash]]:
         "SHA-512": hashlib.sha512,
         "SHA-512-SESS": hashlib.sha512,
     }
-    if _md5_is_available():
-        algorithms["MD5"] = hashlib.md5
-        algorithms["MD5-SESS"] = hashlib.md5
+    # MD5 is not FIPS-approved. Some FIPS-enforced Python builds remove hashlib.md5
+    # entirely, while others keep it but raise ValueError when called with
+    # usedforsecurity=True (the default). Only register MD5 if it is actually usable.
+    if hasattr(hashlib, "md5"):
+        try:
+            hashlib.md5(b"", usedforsecurity=True)
+        except ValueError:
+            pass
+        else:
+            algorithms["MD5"] = hashlib.md5
+            algorithms["MD5-SESS"] = hashlib.md5
     return algorithms
 
 
