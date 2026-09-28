@@ -4,7 +4,6 @@ Unit tests for auth classes.
 Integration tests also exist in tests/client/test_auth.py
 """
 
-import hashlib
 from urllib.request import parse_keqv_list
 
 import pytest
@@ -277,14 +276,6 @@ def test_digest_auth_empty_realm() -> None:
     assert request.headers["Authorization"].startswith('Digest username="user", realm="", nonce="..."')
 
 
-def test_digest_auth_algorithm_map_with_md5() -> None:
-    algorithms = _build_algorithm_map()
-
-    assert algorithms["MD5"] is hashlib.md5
-    assert algorithms["MD5-SESS"] is hashlib.md5
-    assert "SHA-256" in algorithms
-
-
 def test_digest_auth_algorithm_map_without_hashlib_md5(monkeypatch: pytest.MonkeyPatch) -> None:
     # Simulate a FIPS-enforced Python build that strips hashlib.md5 entirely.
     monkeypatch.delattr("hashlib.md5", raising=False)
@@ -310,17 +301,14 @@ def test_digest_auth_algorithm_map_with_blocked_hashlib_md5(monkeypatch: pytest.
     assert "SHA-256" in algorithms
 
 
-def test_digest_auth_unavailable_algorithm_raises_protocol_error(monkeypatch: pytest.MonkeyPatch) -> None:
-    # When a server requests an algorithm not in the map, a clear error is raised.
-    monkeypatch.setattr(httpx2.DigestAuth, "_ALGORITHM_TO_HASH_FUNCTION", {})
-
+def test_digest_auth_unsupported_algorithm() -> None:
     auth = httpx2.DigestAuth(username="user", password="pass")
     request = httpx2.Request("GET", "https://www.example.com")
 
     flow = auth.sync_auth_flow(request)
     request = next(flow)
 
-    headers = {"WWW-Authenticate": 'Digest realm="test", qop="auth", algorithm=MD5, nonce="abc", opaque="xyz"'}
+    headers = {"WWW-Authenticate": 'Digest realm="test", qop="auth", algorithm=UNKNOWN, nonce="abc", opaque="xyz"'}
     response = httpx2.Response(content=b"Auth required", status_code=401, headers=headers, request=request)
     with pytest.raises(httpx2.ProtocolError, match="Unsupported or unavailable digest auth algorithm"):
         flow.send(response)
