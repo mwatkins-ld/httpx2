@@ -166,8 +166,21 @@ class NetRCAuth(Auth):
         return f"Basic {token}"
 
 
-class DigestAuth(Auth):
-    _ALGORITHM_TO_HASH_FUNCTION: dict[str, typing.Callable[[bytes], _Hash]] = {
+def _md5_is_available() -> bool:
+    # MD5 is not FIPS-approved. Some FIPS-enforced Python builds remove hashlib.md5
+    # entirely, while others keep it but raise ValueError when called with
+    # usedforsecurity=True (the default).
+    if not hasattr(hashlib, "md5"):
+        return False
+    try:
+        hashlib.md5(b"", usedforsecurity=True)
+    except ValueError:
+        return False
+    return True
+
+
+def _build_algorithm_map() -> dict[str, typing.Callable[[bytes], _Hash]]:
+    algorithms: dict[str, typing.Callable[[bytes], _Hash]] = {
         "SHA": hashlib.sha1,
         "SHA-SESS": hashlib.sha1,
         "SHA-256": hashlib.sha256,
@@ -175,16 +188,14 @@ class DigestAuth(Auth):
         "SHA-512": hashlib.sha512,
         "SHA-512-SESS": hashlib.sha512,
     }
-    # MD5 is not FIPS-approved. Some FIPS-enforced Python builds remove hashlib.md5
-    # entirely, while others keep it but raise ValueError when called with
-    # usedforsecurity=True (the default). Only register MD5 if it is actually usable.
-    if hasattr(hashlib, "md5"):
-        try:
-            hashlib.md5(b"", usedforsecurity=True)
-            _ALGORITHM_TO_HASH_FUNCTION["MD5"] = hashlib.md5
-            _ALGORITHM_TO_HASH_FUNCTION["MD5-SESS"] = hashlib.md5
-        except ValueError:
-            pass
+    if _md5_is_available():
+        algorithms["MD5"] = hashlib.md5
+        algorithms["MD5-SESS"] = hashlib.md5
+    return algorithms
+
+
+class DigestAuth(Auth):
+    _ALGORITHM_TO_HASH_FUNCTION = _build_algorithm_map()
 
     def __init__(self, username: str | bytes, password: str | bytes) -> None:
         self._username = to_bytes(username)
@@ -249,12 +260,12 @@ class DigestAuth(Auth):
     def _build_auth_header(self, request: Request, challenge: _DigestAuthChallenge) -> str:
         try:
             hash_func = self._ALGORITHM_TO_HASH_FUNCTION[challenge.algorithm.upper()]
-        except KeyError:
+        except KeyError as exc:
             supported = ", ".join(sorted(self._ALGORITHM_TO_HASH_FUNCTION))
             message = (
                 f"Unsupported or unavailable digest auth algorithm '{challenge.algorithm}'. Supported: {supported}"
             )
-            raise ProtocolError(message, request=request)
+            raise ProtocolError(message, request=request) from exc
 
         def digest(data: bytes) -> bytes:
             return hash_func(data).hexdigest().encode()

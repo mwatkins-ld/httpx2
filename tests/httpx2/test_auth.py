@@ -4,11 +4,13 @@ Unit tests for auth classes.
 Integration tests also exist in tests/client/test_auth.py
 """
 
+import hashlib
 from urllib.request import parse_keqv_list
 
 import pytest
 
 import httpx2
+from httpx2._auth import _build_algorithm_map
 
 
 def test_basic_auth() -> None:
@@ -275,61 +277,37 @@ def test_digest_auth_empty_realm() -> None:
     assert request.headers["Authorization"].startswith('Digest username="user", realm="", nonce="..."')
 
 
-def test_digest_auth_importable_without_hashlib_md5(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Verify the import-time hasattr guard works by reloading the module
-    # with hashlib.md5 removed, simulating a FIPS build that strips it entirely.
-    import importlib
+def test_digest_auth_algorithm_map_with_md5() -> None:
+    algorithms = _build_algorithm_map()
 
-    from httpx2 import _auth
+    assert algorithms["MD5"] is hashlib.md5
+    assert algorithms["MD5-SESS"] is hashlib.md5
+    assert "SHA-256" in algorithms
 
+
+def test_digest_auth_algorithm_map_without_hashlib_md5(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Simulate a FIPS-enforced Python build that strips hashlib.md5 entirely.
     monkeypatch.delattr("hashlib.md5", raising=False)
-    try:
-        importlib.reload(_auth)
-        assert "MD5" not in _auth.DigestAuth._ALGORITHM_TO_HASH_FUNCTION
-        assert "SHA-256" in _auth.DigestAuth._ALGORITHM_TO_HASH_FUNCTION
-    finally:
-        monkeypatch.undo()
-        importlib.reload(_auth)
+
+    algorithms = _build_algorithm_map()
+
+    assert "MD5" not in algorithms
+    assert "MD5-SESS" not in algorithms
+    assert "SHA-256" in algorithms
 
 
-def test_digest_auth_importable_with_blocked_hashlib_md5(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Verify the import-time guard works when hashlib.md5 exists but raises
-    # ValueError, simulating a FIPS build that blocks MD5 at call time.
-    import importlib
-
-    from httpx2 import _auth
-
+def test_digest_auth_algorithm_map_with_blocked_hashlib_md5(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Simulate a FIPS-enforced Python build that keeps hashlib.md5 but blocks it at call time.
     def fips_blocked_md5(*args: object, **kwargs: object) -> None:
         raise ValueError("[digital envelope routines] disabled for FIPS")
 
     monkeypatch.setattr("hashlib.md5", fips_blocked_md5)
-    try:
-        importlib.reload(_auth)
-        assert "MD5" not in _auth.DigestAuth._ALGORITHM_TO_HASH_FUNCTION
-        assert "SHA-256" in _auth.DigestAuth._ALGORITHM_TO_HASH_FUNCTION
-    finally:
-        monkeypatch.undo()
-        importlib.reload(_auth)
 
+    algorithms = _build_algorithm_map()
 
-def test_digest_auth_fips_missing_md5(monkeypatch: pytest.MonkeyPatch) -> None:
-    # On FIPS-enforced Python, hashlib.md5 may not exist.
-    # Simulate by removing MD5 entries from the algorithm map.
-    fips_algorithms = {k: v for k, v in httpx2.DigestAuth._ALGORITHM_TO_HASH_FUNCTION.items() if "MD5" not in k}
-    monkeypatch.setattr(httpx2.DigestAuth, "_ALGORITHM_TO_HASH_FUNCTION", fips_algorithms)
-
-    # SHA-256 digest auth should still work.
-    auth = httpx2.DigestAuth(username="user", password="pass")
-    request = httpx2.Request("GET", "https://www.example.com")
-
-    flow = auth.sync_auth_flow(request)
-    request = next(flow)
-
-    headers = {"WWW-Authenticate": 'Digest realm="test", qop="auth", algorithm=SHA-256, nonce="abc", opaque="xyz"'}
-    response = httpx2.Response(content=b"Auth required", status_code=401, headers=headers, request=request)
-    request = flow.send(response)
-    assert request.headers["Authorization"].startswith("Digest")
-    assert "algorithm=SHA-256" in request.headers["Authorization"]
+    assert "MD5" not in algorithms
+    assert "MD5-SESS" not in algorithms
+    assert "SHA-256" in algorithms
 
 
 def test_digest_auth_unavailable_algorithm_raises_protocol_error(monkeypatch: pytest.MonkeyPatch) -> None:
