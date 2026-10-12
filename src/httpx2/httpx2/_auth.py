@@ -241,7 +241,7 @@ class DigestAuth(Auth):
 
     def _build_auth_header(self, request: Request, challenge: _DigestAuthChallenge) -> str:
         try:
-            hash_function: Callable[[bytes], _Hash] = getattr(
+            hash_func: Callable[[bytes], _Hash] = getattr(
                 hashlib, self._ALGORITHM_TO_HASH_NAME[challenge.algorithm.upper()]
             )
         except (KeyError, AttributeError) as exc:
@@ -249,7 +249,7 @@ class DigestAuth(Auth):
             raise ProtocolError(message, request=request) from exc
 
         def digest(data: bytes) -> bytes:
-            return hash_function(data).hexdigest().encode()
+            return hash_func(data).hexdigest().encode()
 
         A1 = b":".join((self._username, challenge.realm, self._password))
 
