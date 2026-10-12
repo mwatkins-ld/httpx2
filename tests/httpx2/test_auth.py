@@ -288,11 +288,16 @@ def test_digest_auth_unsupported_algorithm() -> None:
         flow.send(response)
 
 
-def test_digest_auth_md5_blocked_by_fips(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fips_new(name: str, data: bytes = b"") -> typing.Any:
-        raise ValueError(f"[digital envelope routines] unsupported: {name}")
+def fips_blocked_md5(data: bytes = b"") -> typing.Any:
+    raise ValueError("[digital envelope routines] unsupported")
 
-    monkeypatch.setattr(hashlib, "new", fips_new)
+
+@pytest.mark.parametrize("md5", [fips_blocked_md5, None], ids=["blocked", "removed"])
+def test_digest_auth_md5_unavailable(monkeypatch: pytest.MonkeyPatch, md5: typing.Any) -> None:
+    if md5 is None:
+        monkeypatch.delattr(hashlib, "md5", raising=False)
+    else:
+        monkeypatch.setattr(hashlib, "md5", md5)
     auth = httpx2.DigestAuth(username="user", password="pass")
     flow = auth.sync_auth_flow(httpx2.Request("GET", "https://www.example.com"))
     request = next(flow)

@@ -12,6 +12,10 @@ from ._exceptions import ProtocolError
 from ._models import Cookies, Request, Response
 from ._utils import to_bytes, to_str
 
+if typing.TYPE_CHECKING:
+    from collections.abc import Callable
+    from hashlib import _Hash
+
 __all__ = ["Auth", "BasicAuth", "DigestAuth", "FunctionAuth", "NetRCAuth"]
 
 
@@ -237,14 +241,17 @@ class DigestAuth(Auth):
 
     def _build_auth_header(self, request: Request, challenge: _DigestAuthChallenge) -> str:
         try:
-            hash_name = self._ALGORITHM_TO_HASH_NAME[challenge.algorithm.upper()]
-            hashlib.new(hash_name)
-        except (KeyError, ValueError) as exc:
+            # Not `hashlib.new`, which falls back to builtin hashes that bypass the FIPS policy.
+            hash_function: Callable[[bytes], _Hash] = getattr(
+                hashlib, self._ALGORITHM_TO_HASH_NAME[challenge.algorithm.upper()]
+            )
+            hash_function(b"")
+        except (KeyError, AttributeError, ValueError) as exc:
             message = f"Unsupported digest auth algorithm {challenge.algorithm!r}"
             raise ProtocolError(message, request=request) from exc
 
         def digest(data: bytes) -> bytes:
-            return hashlib.new(hash_name, data).hexdigest().encode()
+            return hash_function(data).hexdigest().encode()
 
         A1 = b":".join((self._username, challenge.realm, self._password))
 
