@@ -292,8 +292,16 @@ def fips_blocked_md5(data: bytes = b"") -> typing.Any:
     raise ValueError("[digital envelope routines] unsupported")
 
 
-@pytest.mark.parametrize("md5", [fips_blocked_md5, None], ids=["blocked", "removed"])
-def test_digest_auth_md5_unavailable(monkeypatch: pytest.MonkeyPatch, md5: typing.Any) -> None:
+@pytest.mark.parametrize(
+    ["md5", "error", "match"],
+    [
+        pytest.param(fips_blocked_md5, ValueError, "digital envelope routines", id="blocked"),
+        pytest.param(None, httpx2.ProtocolError, "Unsupported digest auth algorithm 'MD5'", id="removed"),
+    ],
+)
+def test_digest_auth_md5_unavailable(
+    monkeypatch: pytest.MonkeyPatch, md5: typing.Any, error: type[Exception], match: str
+) -> None:
     if md5 is None:
         monkeypatch.delattr(hashlib, "md5", raising=False)
     else:
@@ -304,5 +312,5 @@ def test_digest_auth_md5_unavailable(monkeypatch: pytest.MonkeyPatch, md5: typin
 
     headers = {"WWW-Authenticate": 'Digest realm="test", algorithm=MD5, nonce="abc"'}
     response = httpx2.Response(status_code=401, headers=headers, request=request)
-    with pytest.raises(httpx2.ProtocolError, match="Unsupported digest auth algorithm 'MD5'"):
+    with pytest.raises(error, match=match):
         flow.send(response)

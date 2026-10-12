@@ -241,12 +241,10 @@ class DigestAuth(Auth):
 
     def _build_auth_header(self, request: Request, challenge: _DigestAuthChallenge) -> str:
         try:
-            # Not `hashlib.new`, which falls back to builtin hashes that bypass the FIPS policy.
             hash_function: Callable[[bytes], _Hash] = getattr(
                 hashlib, self._ALGORITHM_TO_HASH_NAME[challenge.algorithm.upper()]
             )
-            hash_function(b"")
-        except (KeyError, AttributeError, ValueError) as exc:
+        except (KeyError, AttributeError) as exc:
             message = f"Unsupported digest auth algorithm {challenge.algorithm!r}"
             raise ProtocolError(message, request=request) from exc
 
